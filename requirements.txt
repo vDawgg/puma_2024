@@ -115,3 +115,6 @@ wcwidth==0.2.13
 webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
+
+wholeslidedata~=0.1.0
+matplotlib~=3.9.3
