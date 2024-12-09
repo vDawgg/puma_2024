@@ -91,3 +91,4 @@ if __name__ == "__main__":
     out_path = "./data/output"
 
     train_ds, val_ds, test_ds = get_ds(ims_path, segs_path, out_path)
+    print(train_ds)
