@@ -6,6 +6,7 @@ from monai.networks.nets import Unet
 from torch.utils.data import DataLoader
 from NucleiDS import NucleiDS
 from torchvision.transforms import v2
+import torch.nn as nn
 
 transform = v2.Compose([
         v2.ToImage(),
@@ -26,7 +27,7 @@ sample_mask = masks[0].numpy()
 net = Unet(
     spatial_dims=2,
     in_channels=4,
-    out_channels=1,
+    out_channels=4,
     channels=(4, 8, 16, 32, 64, 128, 256),
     strides=(2, 2, 2, 2, 2, 2),
     num_res_units=2
@@ -34,3 +35,7 @@ net = Unet(
 
 pred_mask = net(images)
 print(pred_mask.size())
+
+loss_func = nn.CrossEntropyLoss()
+loss = loss_func(masks, pred_mask)
+print(loss.item())
