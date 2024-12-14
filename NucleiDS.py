@@ -72,7 +72,7 @@ if __name__ == "__main__":
         v2.ToDtype(torch.float32, scale=True)
     ])
     dataset = NucleiDS(image_path="./data/01_training_dataset_tif_ROIs/", geojson_path="./data/01_training_dataset_geojson_nuclei/", image_transform=transform)
-    dataloader = DataLoader(dataset=dataset, batch_size=8, shuffle=True)
+    dataloader = DataLoader(dataset=dataset, batch_size=4, shuffle=True)
     images, masks = next(iter(dataloader))
     print(images.size())
     print(masks.size())

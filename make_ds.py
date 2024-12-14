@@ -11,7 +11,7 @@ from wholeslidedata.samplers.patchlabelsampler import SegmentationPatchLabelSamp
 from wholeslidedata.annotation.wholeslideannotation import WholeSlideAnnotation
 from monai.data import Dataset, DataLoader
 import monai
-
+from monai.data import PILReader
 
 data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
 geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_nuclei")
@@ -99,7 +99,7 @@ def get_ds(ims_path: str,
 if __name__ == "__main__":
     base_transforms = Compose(
         [
-            LoadImaged(keys=["img", "seg"]),
+            LoadImaged(keys=["img", "seg"], reader=PILReader()),
             EnsureChannelFirstd(keys=["img", "seg"]),
             ScaleIntensityd(keys=["img", "seg"]),
         ]
