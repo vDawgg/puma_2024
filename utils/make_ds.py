@@ -13,7 +13,7 @@ from monai.data import Dataset, DataLoader
 import monai
 from monai.data import PILReader
 
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
+data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_nuclei")
 ims_dir = os.path.join(data_dir, "01_training_dataset_tif_ROIs")
 masks_dir = os.path.join(data_dir, "masks_nuclei")
