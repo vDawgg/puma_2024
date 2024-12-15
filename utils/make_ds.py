@@ -95,6 +95,9 @@ def get_ds(ims_path: str,
 
     return train_ds, val_ds, test_ds
 
+def get_tissue_ds():
+    pass
+
 
 if __name__ == "__main__":
     base_transforms = Compose(

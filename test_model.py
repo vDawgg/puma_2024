@@ -1,12 +1,10 @@
 import torch
 import os
 import matplotlib.pyplot as plt
-import numpy as np
 from monai.networks.nets import Unet
 from torch.utils.data import DataLoader
 import torch.nn as nn
-import monai
-from make_ds import get_ds
+from utils.make_ds import get_ds
 from monai.data import PILReader
 from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd
 
@@ -76,6 +74,7 @@ def training():
     plt.plot(training_loss_history)
     plt.show()
     evaluation()
+
 def evaluation():
     net.load_state_dict(torch.load("unet_model.pt", weights_only=True, map_location=device))
     net.eval()
@@ -87,4 +86,3 @@ def evaluation():
     plt.show()
 
 training()
-#evaluation()

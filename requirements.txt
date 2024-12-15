@@ -118,3 +118,6 @@ websocket-client==1.8.0
 
 wholeslidedata~=0.1.0
 matplotlib~=3.9.3
+shapely~=2.0.6
+scipy~=1.14.1
+torchvision~=0.20.1
