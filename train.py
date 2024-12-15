@@ -41,14 +41,15 @@ loss_function = monai.losses.DiceLoss(sigmoid=True)
 optimizer = torch.optim.Adam(model.parameters(), 1e-3)
 
 # start a typical PyTorch training
-val_interval = 2
+val_interval = 5
 best_metric = -1
 best_metric_epoch = -1
+epochs = 100000
 epoch_loss_values = list()
 metric_values = list()
-for epoch in range(10):
+for epoch in range(epochs):
     print("-" * 10)
-    print(f"epoch {epoch + 1}/{10}")
+    print(f"epoch {epoch + 1}/{epochs}")
     model.train()
     epoch_loss = 0
     step = 0

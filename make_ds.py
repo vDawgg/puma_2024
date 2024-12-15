@@ -80,8 +80,8 @@ def get_ds(ims_path: str,
 
     train_img_paths = metastatic_img_paths[:train_split] + primary_img_paths[:train_split]
     train_seg_paths = metastatic_seg_paths[:train_split] + primary_seg_paths[:train_split]
-    val_img_paths = metastatic_img_paths[train_split:val_split] + primary_img_paths[train_split:val_split]
-    val_seg_paths = metastatic_seg_paths[train_split:val_split] + primary_seg_paths[train_split:val_split]
+    val_img_paths = metastatic_img_paths[train_split:val_split+train_split] + primary_img_paths[train_split:val_split+train_split]
+    val_seg_paths = metastatic_seg_paths[train_split:val_split+train_split] + primary_seg_paths[train_split:val_split+train_split]
     test_img_paths = metastatic_img_paths[train_split+val_split:] + primary_img_paths[train_split+val_split:]
     test_seg_paths = metastatic_seg_paths[train_split+val_split:] + primary_seg_paths[train_split+val_split:]
 
