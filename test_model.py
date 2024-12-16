@@ -1,13 +1,13 @@
 import torch
 import os
 import matplotlib.pyplot as plt
-from monai.networks.nets import Unet
+from monai.networks.nets import Unet, AttentionUnet
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from utils.make_ds import get_ds
 from monai.data import PILReader
 from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, RandFlipd, RandRotated, RandZoomd, RandSpatialCropd
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 # paths
 data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
@@ -18,7 +18,7 @@ masks_dir = os.path.join(data_dir, "masks_nuclei")
 # parameter
 n_epoch = 100
 learning_rate = 1e-5
-batch_size = 16
+batch_size = 32
 device = "cuda"
 
 base_transforms = Compose(
@@ -35,7 +35,7 @@ base_transforms = Compose(
 )
 
 train_ds, val_ds, test_ds = get_ds(ims_dir, geojson_dir, masks_dir, base_transforms, base_transforms)
-print(len(test_ds))
+
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_ds, batch_size=batch_size)
 val_loader = DataLoader(val_ds, batch_size=batch_size)
@@ -53,6 +53,7 @@ def plot_sample():
     plt.imshow(sample_mask, cmap="viridis", alpha=0.2)
     plt.show()
 
+'''
 net = Unet(
     spatial_dims=2,
     in_channels=4,
@@ -61,9 +62,22 @@ net = Unet(
     strides=(2, 2, 2, 2, 2, 2, 2),
     num_res_units=2
 ).to(device)
+'''
+net = AttentionUnet(spatial_dims=2,
+                    in_channels=4,
+                    out_channels=4,
+                    channels=(16, 32, 64, 128, 128, 256, 512),
+                    strides=(2, 2, 2, 2, 2, 2),
+                    kernel_size=5,
+                    up_kernel_size=5,
+                    dropout=0.2).to(device)#'''
+# oder SegResNet
+net.load_state_dict(torch.load("unet_model.pt", weights_only=True, map_location=device))
 
-loss_func = nn.CrossEntropyLoss()
+loss_func = nn.CrossEntropyLoss() # ganz wichtig, Dice Loss implementieren. Klassen sind stark unbalanciert.
 optimizer = torch.optim.AdamW(net.parameters(), lr=learning_rate)
+# man könnte noch ReduceLROnPlateau hinzufügen, lohnt sich momentan aber noch nicht
+scaler = GradScaler()
 training_loss_history = []
 test_loss_history = []
 def training():
@@ -77,10 +91,14 @@ def training():
             masks = batch["seg"]
             images = images.to(device)
             masks = masks.to(device).squeeze(1)
-            pred_mask = net(images)
-            loss = loss_func(pred_mask, masks.long())
-            loss.backward()
-            optimizer.step()
+            with autocast(device_type="cuda"):
+                pred_mask = net(images)
+                loss = loss_func(pred_mask, masks.long())
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            #loss.backward()
+            #optimizer.step()
             training_loss += loss.item()
         # testing
         test_loss = 0
