@@ -1,5 +1,7 @@
 from typing import Any
 
+from PIL import Image
+from matplotlib import pyplot as plt
 from monai.data import DataLoader, list_data_collate, decollate_batch
 
 from utils.make_ds import get_ds, ims_dir, geojson_dir, masks_dir
@@ -9,12 +11,13 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
 from monai.transforms import Compose, Activations, AsDiscrete, LoadImaged, EnsureChannelFirstd, ScaleIntensityd
 
+from utils.mask_to_json import convert_mask_to_json
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
 
 def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: int) -> None:
     dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
-    post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
     loss_function = monai.losses.DiceLoss(sigmoid=True)
     optimizer = torch.optim.Adam(model.parameters(), 1e-3)
 
@@ -77,13 +80,23 @@ def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: 
 
     print(f"train completed, best_metric: {best_metric:.4f} at epoch: {best_metric_epoch}")
 
-def make_output_json(model_outputs):
-    for out in model_outputs:
-        pass
 
-
-def evaluate(test_loader: DataLoader, checkpoint_name: str) -> None:
-    pass
+def evaluate(test_loader: DataLoader, checkpoint_name: str, model: Any) -> None:
+    model.load_state_dict(torch.load(f"models/{checkpoint_name}.pth"))
+    with torch.no_grad():
+        for i, test_data in enumerate(test_loader):
+            test_images, test_labels = test_data["img"].to(device), test_data["seg"].to(device)
+            """roi_size = (96, 96)
+            sw_batch_size = 4
+            test_outputs = sliding_window_inference(test_images, roi_size, sw_batch_size, model)
+            test_outputs = [post_trans(i).cpu() for i in decollate_batch(test_outputs)]"""
+            output = model(test_images)
+            img_mask = torch.max(output, dim=1)[1]
+            # print(torch.max(pred_mask, dim=1)[1].size())
+            plt.imshow(img_mask[0].cpu().numpy(), cmap="viridis")
+            plt.colorbar()
+            plt.show()
+            #json = convert_mask_to_json(output[0])
 
 if __name__ == "__main__":
     base_transforms = Compose(
@@ -114,9 +127,12 @@ if __name__ == "__main__":
         num_res_units=2,
     ).to(device)
 
-    train(
+    """train(
         train_loader,
         val_loader,
         model,
         100000
-    )
+    )"""
+
+    test_loader = DataLoader(test_ds, batch_size=1, num_workers=4, collate_fn=list_data_collate)
+    evaluate(test_loader, "unet_no_transforms_80-10-10_split", model)
