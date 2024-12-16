@@ -69,10 +69,9 @@ def get_ds(ims_path: str,
            val_test_transforms: Compose,
            split=(0.8, 0.1, 0.1)) -> [Dataset]:
     pool = Pool()
-
-    metastatic_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if 'metastatic' in seg_f])
+    metastatic_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if ('metastatic' in seg_f and ".geojson" in seg_f)])
     metastatic_img_paths = sorted([os.path.join(ims_path, im_f) for im_f in os.listdir(ims_path) if 'metastatic' in im_f])
-    primary_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if 'primary' in seg_f])
+    primary_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if ('primary' in seg_f and '.geojson' in seg_f)])
     primary_img_paths = sorted([os.path.join(ims_path, im_f) for im_f in os.listdir(ims_path) if 'primary' in im_f])
 
     train_split = int(len(metastatic_seg_paths)*split[0])
@@ -92,7 +91,7 @@ def get_ds(ims_path: str,
     train_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
     val_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
     test_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(test_img_paths, test_mask_paths)], transform=val_test_transforms)
-
+    
     return train_ds, val_ds, test_ds
 
 def get_tissue_ds():
