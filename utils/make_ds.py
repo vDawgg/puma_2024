@@ -18,8 +18,28 @@ geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_nuclei")
 ims_dir = os.path.join(data_dir, "01_training_dataset_tif_ROIs")
 masks_dir = os.path.join(data_dir, "masks_nuclei")
 
-def make_mask(geojson_path):
+
+def make_mask(geojson_path: str, class_map: dict[str, int]) -> np.ndarray:
     tile_size = 1024
+
+    labels = [Label.create(label_name, value=label_value) for label_name, label_value in class_map.items()]
+    wsa = WholeSlideAnnotation(geojson_path, labels=labels)
+
+    ratio = 1
+
+    label_sampler = SegmentationPatchLabelSampler()
+    mask = label_sampler.sample(
+        wsa,
+        (
+            tile_size // 2,
+            tile_size // 2,
+        ),
+        (tile_size, tile_size),
+        ratio,
+    )
+    return mask
+
+def make_mask_nuclei(geojson_path):
     class_map = {
         "nuclei_tumor": 1,
         "nuclei_lymphocyte": 2,
@@ -32,26 +52,13 @@ def make_mask(geojson_path):
         "nuclei_epithelium": 3,
         "nuclei_apoptosis": 3,
     }
+    return make_mask(geojson_path, class_map)
 
-    labels = [Label.create(label_name, value=label_value) for label_name, label_value in class_map.items()]
-    wsa = WholeSlideAnnotation(geojson_path, labels=labels)
+def make_masks_tissue(geojson_path):
+    class_map = {
 
-    shape = (1024, 1024)
-    ratio = 1
-
-    label_sampler = SegmentationPatchLabelSampler()
-    for y_pos in range(0, shape[1], tile_size):
-        for x_pos in range(0, shape[0], tile_size):
-            mask = label_sampler.sample(
-                wsa,
-                (
-                    (x_pos + tile_size // 2),
-                    (y_pos + tile_size // 2),
-                ),
-                (tile_size, tile_size),
-                ratio,
-            )
-            return mask
+    }
+    return make_mask(geojson_path, class_map)
 
 def get_maks(input_paths: [str], ppool: Any, output_path: str) -> [str]:
     file_names = [os.path.join(output_path, input_path.split("/")[-1].split(".")[0] + ".tif") for input_path in input_paths]
@@ -88,9 +95,9 @@ def get_ds(ims_path: str,
     val_mask_paths = get_maks(val_seg_paths, pool, os.path.join(masks_path, "val"))
     test_mask_paths = get_maks(test_seg_paths, pool, os.path.join(masks_path, "test"))
 
-    train_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
-    val_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
-    test_ds = Dataset([{"img": img, "seg": seg} for img, seg in zip(test_img_paths, test_mask_paths)], transform=val_test_transforms)
+    train_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
+    val_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
+    test_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(test_img_paths, test_mask_paths)], transform=val_test_transforms)
     
     return train_ds, val_ds, test_ds
 

@@ -1,25 +1,26 @@
 from typing import Any
 
-from PIL import Image
 from matplotlib import pyplot as plt
-from monai.data import DataLoader, list_data_collate, decollate_batch
+from monai.data import DataLoader, list_data_collate, decollate_batch, PILReader
+from monai.networks.nets import AttentionUnet
+from monai.optimizers import LearningRateFinder
 
 from utils.make_ds import get_ds, ims_dir, geojson_dir, masks_dir
 import monai
 import torch
-from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
-from monai.transforms import Compose, Activations, AsDiscrete, LoadImaged, EnsureChannelFirstd, ScaleIntensityd
+from monai.transforms import Compose, Activations, AsDiscrete, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, \
+    RandFlipd, RandRotated, RandZoomd, RandSpatialCropd
 
 from utils.mask_to_json import convert_mask_to_json
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+post_trans = Compose([Activations(sigmoid=True), AsDiscrete(rounding="torchrounding")])
 
-def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: int) -> None:
-    dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
+def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: int, lr: float) -> None:
+    dice_metric = DiceMetric(include_background=False, reduction="mean", get_not_nans=False)
     loss_function = monai.losses.DiceLoss(sigmoid=True)
-    optimizer = torch.optim.Adam(model.parameters(), 1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # start a typical PyTorch training
     val_interval = 5
@@ -35,7 +36,7 @@ def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: 
         step = 0
         for batch_data in train_loader:
             step += 1
-            inputs, labels = batch_data["img"].to(device), batch_data["seg"].to(device)
+            inputs, labels = batch_data["image"].to(device), batch_data["label"].to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = loss_function(outputs, labels)
@@ -55,10 +56,8 @@ def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: 
                 val_labels = None
                 val_outputs = None
                 for val_data in val_loader:
-                    val_images, val_labels = val_data["img"].to(device), val_data["seg"].to(device)
-                    roi_size = (96, 96)
-                    sw_batch_size = 4
-                    val_outputs = sliding_window_inference(val_images, roi_size, sw_batch_size, model)
+                    val_images, val_labels = val_data["image"].to(device), val_data["label"].to(device)
+                    val_outputs = model(val_images)
                     val_outputs = [post_trans(i) for i in decollate_batch(val_outputs)]
                     # compute metric for current iteration
                     dice_metric(y_pred=val_outputs, y=val_labels)
@@ -85,28 +84,53 @@ def evaluate(test_loader: DataLoader, checkpoint_name: str, model: Any) -> None:
     model.load_state_dict(torch.load(f"models/{checkpoint_name}.pth"))
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
-            test_images, test_labels = test_data["img"].to(device), test_data["seg"].to(device)
-            """roi_size = (96, 96)
-            sw_batch_size = 4
-            test_outputs = sliding_window_inference(test_images, roi_size, sw_batch_size, model)
-            test_outputs = [post_trans(i).cpu() for i in decollate_batch(test_outputs)]"""
+            test_images, test_labels = test_data["image"].to(device), test_data["label"].to(device)
             output = model(test_images)
-            img_mask = torch.max(output, dim=1)[1]
-            # print(torch.max(pred_mask, dim=1)[1].size())
-            plt.imshow(img_mask[0].cpu().numpy(), cmap="viridis")
-            plt.colorbar()
+            fig, axes = plt.subplots(1, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns
+
+            # Display the first image in the first subplot
+            axes[0].imshow(output.cpu()[0, 0, :, :])
+            axes[0].set_title('Output Image')
+            axes[0].axis('off')  # Hide axis if desired
+
+            # Display the second image in the second subplot
+            axes[1].imshow(test_images.cpu()[0, 0, :, :])
+            axes[1].set_title('Test Image')
+            axes[1].axis('off')  # Hide axis if desired
+
+            plt.tight_layout()  # Adjust spacing between subplots
             plt.show()
             #json = convert_mask_to_json(output[0])
 
+def find_lr(model, optimizer, l_f, data_loader) -> float:
+    lr_finder = LearningRateFinder(model, optimizer, l_f)
+    lr_finder.range_test(data_loader, end_lr=100, num_iter=100)
+    lr, _ = lr_finder.get_steepest_gradient()
+    lr_finder.plot()
+    return lr
+
+
 if __name__ == "__main__":
-    base_transforms = Compose(
+    train_transforms = Compose(
         [
-            LoadImaged(keys=["img", "seg"]),
-            EnsureChannelFirstd(keys=["img", "seg"]),
-            ScaleIntensityd(keys=["img", "seg"]),
+            LoadImaged(keys=["image", "label"], reader=PILReader()),
+            EnsureChannelFirstd(keys=["image", "label"]),
+            ScaleIntensityd(keys=["image", "label"]),
+            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+            RandRotated(keys=["image", "label"], range_x=15, prob=0.5, keep_size=True),
+            RandZoomd(keys=["image", "label"], min_zoom=0.9, max_zoom=1.1, prob=0.5, keep_size=True),
+            RandSpatialCropd(keys=["image", "label"], roi_size=(256, 256), random_size=False)
         ]
     )
-    train_ds, val_ds, test_ds = get_ds(ims_dir, geojson_dir, masks_dir, base_transforms, base_transforms)
+    val_transforms = Compose(
+        [
+            LoadImaged(keys=["image", "label"], reader=PILReader()),
+            EnsureChannelFirstd(keys=["image", "label"]),
+            ScaleIntensityd(keys=["image", "label"]),
+        ]
+    )
+    train_ds, val_ds, test_ds = get_ds(ims_dir, geojson_dir, masks_dir, train_transforms, val_transforms)
 
     train_loader = DataLoader(
         train_ds,
@@ -118,21 +142,26 @@ if __name__ == "__main__":
     )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=4, collate_fn=list_data_collate)
 
-    model = monai.networks.nets.UNet(
+    model = AttentionUnet(
         spatial_dims=2,
-        in_channels=3,
+        in_channels=4,
         out_channels=1,
-        channels=(16, 32, 64, 128, 256),
-        strides=(2, 2, 2, 2),
-        num_res_units=2,
+        channels=(16, 32, 64, 128, 128, 256, 512),
+        strides=(2, 2, 2, 2, 2, 2),
+        kernel_size=5,
+        up_kernel_size=5,
+        dropout=0.2
     ).to(device)
 
-    """train(
+    lr = find_lr(model, torch.optim.Adam(model.parameters()), monai.losses.DiceLoss(sigmoid=True), train_loader)
+
+    train(
         train_loader,
         val_loader,
         model,
-        100000
-    )"""
+        1000,
+        lr
+    )
 
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=4, collate_fn=list_data_collate)
-    evaluate(test_loader, "unet_no_transforms_80-10-10_split", model)
+    evaluate(test_loader, "best_metric_model_segmentation2d_dict", model)
