@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from matplotlib import pyplot as plt
@@ -5,7 +6,7 @@ from monai.data import DataLoader, list_data_collate, decollate_batch, PILReader
 from monai.networks.nets import AttentionUnet
 from monai.optimizers import LearningRateFinder
 
-from utils.make_ds import get_ds, ims_dir, geojson_dir, masks_dir
+from utils.make_ds import get_ds, ims_dir, nuclei_geojson_dir, nuclei_masks_dir
 import monai
 import torch
 from monai.metrics import DiceMetric
@@ -19,7 +20,7 @@ post_trans = Compose([Activations(sigmoid=True), AsDiscrete(rounding="torchround
 
 def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: int, lr: float) -> None:
     dice_metric = DiceMetric(include_background=False, reduction="mean", get_not_nans=False)
-    loss_function = monai.losses.DiceLoss(sigmoid=True)
+    loss_function = monai.losses.DiceLoss(include_background=False, sigmoid=True, to_onehot_y=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # start a typical PyTorch training
@@ -38,8 +39,9 @@ def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: 
             step += 1
             inputs, labels = batch_data["image"].to(device), batch_data["label"].to(device)
             optimizer.zero_grad()
-            outputs = model(inputs)
+            outputs = model(inputs) #torch.argmax(model(inputs), dim=1, keepdim=True)
             loss = loss_function(outputs, labels)
+            #loss.requires_grad = True
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -57,7 +59,7 @@ def train(train_loader: DataLoader, val_loader: DataLoader, model: Any, epochs: 
                 val_outputs = None
                 for val_data in val_loader:
                     val_images, val_labels = val_data["image"].to(device), val_data["label"].to(device)
-                    val_outputs = model(val_images)
+                    val_outputs = model(val_images) #torch.argmax(model(val_images), dim=1, keepdim=True)
                     val_outputs = [post_trans(i) for i in decollate_batch(val_outputs)]
                     # compute metric for current iteration
                     dice_metric(y_pred=val_outputs, y=val_labels)
@@ -85,7 +87,8 @@ def evaluate(test_loader: DataLoader, checkpoint_name: str, model: Any) -> None:
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
             test_images, test_labels = test_data["image"].to(device), test_data["label"].to(device)
-            output = model(test_images)
+            output = torch.argmax(model(test_images), dim=1, keepdim=True)
+
             fig, axes = plt.subplots(1, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns
 
             # Display the first image in the first subplot
@@ -94,13 +97,19 @@ def evaluate(test_loader: DataLoader, checkpoint_name: str, model: Any) -> None:
             axes[0].axis('off')  # Hide axis if desired
 
             # Display the second image in the second subplot
-            axes[1].imshow(test_images.cpu()[0, 0, :, :])
+            axes[1].imshow(test_labels.cpu()[0, 0, :, :])
             axes[1].set_title('Test Image')
             axes[1].axis('off')  # Hide axis if desired
 
+            print(output.cpu()[0, 0, :, :].shape)
+            print(torch.unique(output.cpu()))
+
             plt.tight_layout()  # Adjust spacing between subplots
             plt.show()
-            #json = convert_mask_to_json(output[0])
+            print(output.shape)
+            json_out = convert_mask_to_json(output.cpu()[0, 0, :, :])
+            with open("test.json", "w") as f:
+                json.dump(json_out, f)
 
 def find_lr(model, optimizer, l_f, data_loader) -> float:
     lr_finder = LearningRateFinder(model, optimizer, l_f)
@@ -115,7 +124,6 @@ if __name__ == "__main__":
         [
             LoadImaged(keys=["image", "label"], reader=PILReader()),
             EnsureChannelFirstd(keys=["image", "label"]),
-            ScaleIntensityd(keys=["image", "label"]),
             RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
             RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
             RandRotated(keys=["image", "label"], range_x=15, prob=0.5, keep_size=True),
@@ -127,14 +135,13 @@ if __name__ == "__main__":
         [
             LoadImaged(keys=["image", "label"], reader=PILReader()),
             EnsureChannelFirstd(keys=["image", "label"]),
-            ScaleIntensityd(keys=["image", "label"]),
         ]
     )
-    train_ds, val_ds, test_ds = get_ds(ims_dir, geojson_dir, masks_dir, train_transforms, val_transforms)
+    train_ds, val_ds, test_ds = get_ds(train_transforms, val_transforms)
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=2,
+        batch_size=4,
         shuffle=True,
         num_workers=4,
         collate_fn=list_data_collate,
@@ -145,7 +152,7 @@ if __name__ == "__main__":
     model = AttentionUnet(
         spatial_dims=2,
         in_channels=4,
-        out_channels=1,
+        out_channels=4,
         channels=(16, 32, 64, 128, 128, 256, 512),
         strides=(2, 2, 2, 2, 2, 2),
         kernel_size=5,
@@ -153,7 +160,10 @@ if __name__ == "__main__":
         dropout=0.2
     ).to(device)
 
-    lr = find_lr(model, torch.optim.Adam(model.parameters()), monai.losses.DiceLoss(sigmoid=True), train_loader)
+    lr = find_lr(model,
+                 torch.optim.Adam(model.parameters()),
+                 monai.losses.DiceLoss(include_background=False, sigmoid=True, to_onehot_y=True),
+                 train_loader)
 
     train(
         train_loader,
