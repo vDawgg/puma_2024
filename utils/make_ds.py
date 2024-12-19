@@ -14,16 +14,23 @@ import monai
 from monai.data import PILReader
 
 data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
-geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_nuclei")
+nuclei_geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_nuclei")
+tissue_geojson_dir = os.path.join(data_dir, "01_training_dataset_geojson_tissue")
 ims_dir = os.path.join(data_dir, "01_training_dataset_tif_ROIs")
-masks_dir = os.path.join(data_dir, "masks_nuclei")
+nuclei_masks_dir = os.path.join(data_dir, "masks_nuclei")
+tissue_masks_dir = os.path.join(data_dir, "masks_tissue")
 
 
 def make_mask(geojson_path: str, class_map: dict[str, int]) -> np.ndarray:
     tile_size = 1024
 
     labels = [Label.create(label_name, value=label_value) for label_name, label_value in class_map.items()]
-    wsa = WholeSlideAnnotation(geojson_path, labels=labels)
+    try:
+        wsa = WholeSlideAnnotation(geojson_path, labels=labels)
+    except Exception:
+        print(labels)
+        print(geojson_path)
+        raise Exception
 
     ratio = 1
 
@@ -56,30 +63,48 @@ def make_mask_nuclei(geojson_path):
 
 def make_masks_tissue(geojson_path):
     class_map = {
-
+        "tissue_stroma": 1,
+        "tissue_blood_vessel": 2,
+        "tissue_tumor": 3,
+        "tissue_epidermis": 4,
+        "tissue_necrosis": 5
     }
     return make_mask(geojson_path, class_map)
 
-def get_maks(input_paths: [str], ppool: Any, output_path: str) -> [str]:
+def test_masks(input_paths: [str], ppool: Any, output_path: str, map_func) -> [str]:
     file_names = [os.path.join(output_path, input_path.split("/")[-1].split(".")[0] + ".tif") for input_path in input_paths]
 
     if not os.path.exists(output_path):
         os.mkdir(output_path)
-        [Image.fromarray(mask).save(file_name) for mask, file_name in zip(ppool.map(make_mask, input_paths), file_names)]
+        for file_name, input_path in zip(file_names, input_paths):
+            Image.fromarray(make_masks_tissue(input_path)).save(file_name)
+    return file_names
+
+def get_maks(input_paths: [str], ppool: Any, output_path: str, map_func) -> [str]:
+    file_names = [os.path.join(output_path, input_path.split("/")[-1].split(".")[0] + ".tif") for input_path in input_paths]
+
+    if not os.path.exists(output_path):
+        os.mkdir(output_path)
+        [Image.fromarray(mask).save(file_name) for mask, file_name in zip(ppool.map(map_func, input_paths), file_names)]
 
     return file_names
 
-def get_ds(ims_path: str,
-           segs_path: str,
-           masks_path: str,
-           train_transforms: Compose,
+def get_ds(train_transforms: Compose,
            val_test_transforms: Compose,
-           split=(0.8, 0.1, 0.1)) -> [Dataset]:
+           split=(0.8, 0.1, 0.1),
+           task="nuclei") -> [Dataset]:
+    if task == "nuclei":
+        segs_path = nuclei_geojson_dir
+        masks_path = nuclei_masks_dir
+    else:
+        segs_path = tissue_geojson_dir
+        masks_path = tissue_masks_dir
+
     pool = Pool()
     metastatic_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if ('metastatic' in seg_f and ".geojson" in seg_f)])
-    metastatic_img_paths = sorted([os.path.join(ims_path, im_f) for im_f in os.listdir(ims_path) if 'metastatic' in im_f])
+    metastatic_img_paths = sorted([os.path.join(ims_dir, im_f) for im_f in os.listdir(ims_dir) if 'metastatic' in im_f])
     primary_seg_paths = sorted([os.path.join(segs_path, seg_f) for seg_f in os.listdir(segs_path) if ('primary' in seg_f and '.geojson' in seg_f)])
-    primary_img_paths = sorted([os.path.join(ims_path, im_f) for im_f in os.listdir(ims_path) if 'primary' in im_f])
+    primary_img_paths = sorted([os.path.join(ims_dir, im_f) for im_f in os.listdir(ims_dir) if 'primary' in im_f])
 
     train_split = int(len(metastatic_seg_paths)*split[0])
     val_split = int(len(metastatic_seg_paths)*split[1])
@@ -91,9 +116,14 @@ def get_ds(ims_path: str,
     test_img_paths = metastatic_img_paths[train_split+val_split:] + primary_img_paths[train_split+val_split:]
     test_seg_paths = metastatic_seg_paths[train_split+val_split:] + primary_seg_paths[train_split+val_split:]
 
-    train_mask_paths = get_maks(train_seg_paths, pool, os.path.join(masks_path, "train"))
-    val_mask_paths = get_maks(val_seg_paths, pool, os.path.join(masks_path, "val"))
-    test_mask_paths = get_maks(test_seg_paths, pool, os.path.join(masks_path, "test"))
+    if task == "nuclei":
+        train_mask_paths = get_maks(train_seg_paths, pool, os.path.join(masks_path, "train"), make_mask_nuclei)
+        val_mask_paths = get_maks(val_seg_paths, pool, os.path.join(masks_path, "val"), make_mask_nuclei)
+        test_mask_paths = get_maks(test_seg_paths, pool, os.path.join(masks_path, "test"), make_mask_nuclei)
+    else:
+        train_mask_paths = test_masks(train_seg_paths, pool, os.path.join(masks_path, "train"), make_mask_nuclei)
+        val_mask_paths = test_masks(val_seg_paths, pool, os.path.join(masks_path, "val"), make_mask_nuclei)
+        test_mask_paths = test_masks(test_seg_paths, pool, os.path.join(masks_path, "test"), make_mask_nuclei)
 
     train_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
     val_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
@@ -108,19 +138,19 @@ def get_tissue_ds():
 if __name__ == "__main__":
     base_transforms = Compose(
         [
-            LoadImaged(keys=["img", "seg"], reader=PILReader()),
-            EnsureChannelFirstd(keys=["img", "seg"]),
-            ScaleIntensityd(keys=["img", "seg"]),
+            LoadImaged(keys=["image", "label"], reader=PILReader()),
+            EnsureChannelFirstd(keys=["image", "label"]),
         ]
     )
 
-    train_ds, val_ds, test_ds = get_ds(ims_dir, geojson_dir, masks_dir, base_transforms, base_transforms)
+    train_ds, val_ds, test_ds = get_ds(base_transforms, base_transforms, task="tissue")
 
-    check_loader = DataLoader(train_ds)
+    check_loader = DataLoader(val_ds)
     check_data = monai.utils.misc.first(check_loader)
-    print(check_data["img"].shape, check_data["seg"].shape)
+    print(check_data["image"].shape, check_data["label"].shape)
+    print(np.unique(check_data["label"]))
 
-    plt.imshow(check_data["img"][0, 0, :, :])
+    plt.imshow(check_data["image"][0, 0, :, :])
     plt.show()
-    plt.imshow(np.transpose(check_data["seg"][0, :, :, :], (1, 2, 0)))
+    plt.imshow(np.transpose(check_data["label"][0, :, :, :], (1, 2, 0)))
     plt.show()
