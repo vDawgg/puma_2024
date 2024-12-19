@@ -6,13 +6,14 @@ from monai.optimizers import LearningRateFinder
 import torch
 from monai.metrics import DiceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
-
+from torch.utils.tensorboard import SummaryWriter
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 post_trans = Compose([Activations(sigmoid=True), AsDiscrete(rounding="torchrounding")])
 
 def train(train_loader: DataLoader, train_ds: Dataset, val_loader: DataLoader, model: Any, epochs: int, lr: float, loss_function) -> None:
-    dice_metric = DiceMetric(include_background=False, reduction="mean", get_not_nans=False)
+    writer = SummaryWriter()
+    dice_metric = DiceMetric(include_background=False, reduction="mean")
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # start a typical PyTorch training
@@ -38,6 +39,7 @@ def train(train_loader: DataLoader, train_ds: Dataset, val_loader: DataLoader, m
             epoch_loss += loss.item()
             epoch_len = len(train_ds) // train_loader.batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
+            writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
@@ -59,6 +61,7 @@ def train(train_loader: DataLoader, train_ds: Dataset, val_loader: DataLoader, m
                 # reset the status for next validation round
                 dice_metric.reset()
                 metric_values.append(metric)
+                writer.add_scalar("val_mean_dice", metric, epoch + 1)
                 if metric > best_metric:
                     best_metric = metric
                     best_metric_epoch = epoch + 1
@@ -71,6 +74,7 @@ def train(train_loader: DataLoader, train_ds: Dataset, val_loader: DataLoader, m
                 )
 
     print(f"train completed, best_metric: {best_metric:.4f} at epoch: {best_metric_epoch}")
+    writer.close()
 
 def find_lr(model, optimizer, l_f, data_loader) -> float:
     lr_finder = LearningRateFinder(model, optimizer, l_f)
