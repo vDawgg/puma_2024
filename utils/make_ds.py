@@ -125,9 +125,9 @@ def get_ds(train_transforms: Compose,
         val_mask_paths = test_masks(val_seg_paths, pool, os.path.join(masks_path, "val"), make_mask_nuclei)
         test_mask_paths = test_masks(test_seg_paths, pool, os.path.join(masks_path, "test"), make_mask_nuclei)
 
-    train_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
-    val_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
-    test_ds = Dataset([{"image": img, "label": seg} for img, seg in zip(test_img_paths, test_mask_paths)], transform=val_test_transforms)
+    train_ds = Dataset([{"image": img, "label": seg, "label_file": seg.split("/")[-1].split(".")[0] + ".tif"} for img, seg in zip(train_img_paths, train_mask_paths)], transform=train_transforms)
+    val_ds = Dataset([{"image": img, "label": seg, "label_file": seg.split("/")[-1].split(".")[0] + ".tif"} for img, seg in zip(val_img_paths, val_mask_paths)], transform=val_test_transforms)
+    test_ds = Dataset([{"image": img, "label": seg, "label_file": seg.split("/")[-1].split(".")[0] + ".tif"} for img, seg in zip(test_img_paths, test_mask_paths)], transform=val_test_transforms)
     
     return train_ds, val_ds, test_ds
 
