@@ -10,7 +10,7 @@ from utils.mask_to_json import convert_mask_to_json
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def evaluate_nuclei(test_loader: DataLoader, checkpoint_name: str, model: Any) -> None:
-    model.load_state_dict(torch.load(f"models/{checkpoint_name}.pth"))
+    model.load_state_dict(torch.load(f"models/{checkpoint_name}.pth", weights_only=True))
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
             test_images, test_labels = test_data["image"].to(device), test_data["label"].to(device)
