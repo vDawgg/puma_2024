@@ -16,21 +16,29 @@ ims_dir = os.path.join(data_dir, "01_training_dataset_tif_ROIs")
 masks_dir = os.path.join(data_dir, "masks_nuclei")
 
 # parameter
-n_epoch = 100
-learning_rate = 1e-5
-batch_size = 32
+n_epoch = 20
+learning_rate = 1e-4
+batch_size = 16
 device = "cuda"
 
 base_transforms = Compose(
     [
-        LoadImaged(keys=["img", "seg"], reader=PILReader()),
-        EnsureChannelFirstd(keys=["img", "seg"]),
-        ScaleIntensityd(keys=["img", "seg"]),
-        RandFlipd(keys=["img", "seg"], prob=0.5, spatial_axis=0),
-        RandFlipd(keys=["img", "seg"], prob=0.5, spatial_axis=1),
-        RandRotated(keys=["img", "seg"], range_x=15, prob=0.5, keep_size=True),
+        LoadImaged(keys=["img", "label"], reader=PILReader()),
+        EnsureChannelFirstd(keys=["img", "label"]),
+        ScaleIntensityd(keys=["img"]),
+        RandFlipd(keys=["img", "label"], prob=0.5, spatial_axis=0),
+        RandFlipd(keys=["img", "label"], prob=0.5, spatial_axis=1),
+        RandRotated(keys=["img", "label"], range_x=15, prob=0.5, keep_size=True),
         RandZoomd(keys=["img", "seg"], min_zoom=0.9, max_zoom=1.1, prob=0.5, keep_size=True),
         RandSpatialCropd(keys=["img", "seg"], roi_size=(256, 256), random_size=False)
+    ]
+)
+
+test_transforms = Compose(
+    [
+        LoadImaged(keys=["img", "label"], reader=PILReader()),
+        EnsureChannelFirstd(keys=["img", "label"]),
+        ScaleIntensityd(keys=["img"]),
     ]
 )
 
@@ -72,11 +80,11 @@ net = AttentionUnet(spatial_dims=2,
                     up_kernel_size=5,
                     dropout=0.2).to(device)#'''
 # oder SegResNet
-net.load_state_dict(torch.load("unet_model.pt", weights_only=True, map_location=device))
+#net.load_state_dict(torch.load("./models/unet_model.pt", weights_only=True, map_location=device))
 
 loss_func = nn.CrossEntropyLoss() # ganz wichtig, Dice Loss implementieren. Klassen sind stark unbalanciert.
 optimizer = torch.optim.AdamW(net.parameters(), lr=learning_rate)
-# man könnte noch ReduceLROnPlateau hinzufügen, lohnt sich momentan aber noch nicht
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=5, threshold=0.0001, cooldown=2)
 scaler = GradScaler()
 training_loss_history = []
 test_loss_history = []
@@ -114,18 +122,19 @@ def training():
                 test_loss += loss.item()
         training_loss /= len(train_loader.dataset)
         test_loss /= len(test_loader.dataset)
+        scheduler.step(test_loss)
         print(f"Epoche: {epoch}, Trainingloss: {training_loss}, Testloss: {test_loss}")
         training_loss_history.append(training_loss)
         test_loss_history.append(test_loss)
         if len(test_loss_history) >= 2:
             if test_loss_history[-1] < test_loss_history[-2]: # immer speichern, wenn die testloss besser geworden ist
-                torch.save(net.state_dict(), "unet_model.pt")
+                torch.save(net.state_dict(), "./models/unet_model.pt")
     plt.plot(training_loss_history)
     plt.show()
     evaluation()
 
 def evaluation():
-    net.load_state_dict(torch.load("unet_model.pt", weights_only=True, map_location=device))
+    net.load_state_dict(torch.load("./models/unet_model.pt", weights_only=True, map_location=device))
     net.eval()
     pred_mask = net(sample['img'].to(device))
     img_mask = torch.max(pred_mask, dim=1)[1]
@@ -135,3 +144,4 @@ def evaluation():
     plt.show()
 
 training()
+#evaluation()
