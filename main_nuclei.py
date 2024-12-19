@@ -1,7 +1,8 @@
 import monai
 import torch
+from torch.utils.tensorboard import SummaryWriter
 from monai.data import PILReader, DataLoader, list_data_collate
-from monai.networks.nets import AttentionUnet
+from monai.networks.nets import AttentionUnet, SwinUNETR
 from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, RandFlipd, RandRotated, \
     RandZoomd, RandSpatialCropd
 
@@ -42,7 +43,9 @@ train_loader = DataLoader(
 )
 val_loader = DataLoader(val_ds, batch_size=1, num_workers=4, collate_fn=list_data_collate)
 
-model = AttentionUnet(
+model = SwinUNETR(img_size=(1024, 1024), in_channels=4, out_channels=4, use_checkpoint=True, spatial_dims=2, use_v2=True).to(device)
+
+"""model = AttentionUnet(
     spatial_dims=2,
     in_channels=4,
     out_channels=4,
@@ -51,9 +54,9 @@ model = AttentionUnet(
     kernel_size=5,
     up_kernel_size=5,
     dropout=0.2
-).to(device)
+).to(device)"""
 
-loss_function = (monai.losses.DiceCELoss(include_background=False, sigmoid=True, to_onehot_y=True))
+loss_function = (monai.losses.DiceFocalLoss(include_background=False, sigmoid=True, to_onehot_y=True))
 
 lr = find_lr(model,
              torch.optim.Adam(model.parameters()),
@@ -65,7 +68,7 @@ train(
     train_ds,
     val_loader,
     model,
-    30,
+    1000,
     lr,
     loss_function,
 )
